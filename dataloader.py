@@ -7,6 +7,8 @@ import torch
 def _tensorify_trials(construct_dict):
     for key in construct_dict.keys():
         construct_dict[key] = torch.Tensor(construct_dict[key]).long()
+        if len(construct_dict[key].shape) == 1:
+            construct_dict[key] = construct_dict[key].reshape(-1, 1)
     return construct_dict
 
 
@@ -31,14 +33,13 @@ class MTurk1BehaviorData:
         """
         cues = set()
         choice = set()
-        construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trail_idx': []}
+        construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
         for i, row in self.data.iterrows():
             cue_idx = self.cue_reindex_map[row['Cue']]
-            choice_idx = self.cue_reindex_map[row['object_selected']]
+            choice_idx = self.cue_reindex_map[row['object selected']]
             if cue_idx in cues and choice_idx in choice:
-                construct['batch_size'] = len(construct['cue_idx'])
                 final_batch = _tensorify_trials(copy.copy(construct))
-                construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trail_idx': []}
+                construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
                 cues = set()
                 choice = set()
                 yield final_batch
@@ -49,20 +50,20 @@ class MTurk1BehaviorData:
                                                 self.target_reindex_map[row['choice2']],
                                                 self.target_reindex_map[row['choice3']],
                                                 self.target_reindex_map[row['choice4']]])
-            construct['choice_made'].append(self.target_reindex_map[row['object selected']])
+            construct['choice_made'].append(choice_idx)
             construct['correct_option'].append(self.target_reindex_map[row['object correct']])
-            construct['trail_idx'].append(self.trial_type_reindex_map[row['trial type']])
-        construct['batch_size'] = len(construct['cue_idx'])
+            construct['trial_type'].append(self.trial_type_reindex_map[row['Task type']])
         yield _tensorify_trials(construct)
 
     def __init__(self, path_to_csv):
         self.data = pd.read_csv(path_to_csv, index_col='Trial')
-        expected_cols = ('Cue', 'object selected', 'object correct', 'trial type', 'choice1', 'choice2', 'choice3', 'choice4')
+        expected_cols = ('Cue', 'object selected', 'object correct', 'Task type', 'choice1', 'choice2', 'choice3', 'choice4')
         if False in [expc in self.data.columns for expc in expected_cols]:
             raise ValueError("All expected Cols must be in data file passed")
         self.cue_reindex_map, self.target_reindex_map, self.trial_type_reindex_map = self.reindex()
         self.num_cues = len(self.cue_reindex_map)
         self.num_targets = len(self.target_reindex_map)
+        self.num_trial_types = len(self.trial_type_reindex_map)
 
 
 if __name__ == '__main__':
