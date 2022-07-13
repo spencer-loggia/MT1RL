@@ -51,17 +51,18 @@ class MT1QL:
         else:
             return likelihood / count
 
-    def fit(self, trial_data, epochs=1000):
+    def fit(self, trial_data, epochs=1000, dev='cuda:0'):
         """
         :param trial_data: see predict
         :param epochs: number of epochs to run
+        :param dev: device to optmize on
         :return:
         """
         epoch_loss = []
         for epoch in range(epochs):
             print('**********\nEPOCH', epoch)
             self.optim.zero_grad()
-            like = self.predict(trial_data, grad=True)
+            like = self.predict(trial_data, grad=True).to(dev)
             epoch_loss.append(like.detach().item())
             (-1 * like).backward()  # we're minimizing
             print('loss', epoch_loss[-1], '\nlearning rates: ', self.lrs, '**********')
