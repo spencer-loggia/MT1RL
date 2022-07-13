@@ -1,5 +1,13 @@
 import pandas as pd
 from collections import namedtuple
+import copy
+import torch
+
+
+def _tensorify_trials(construct_dict):
+    for key in construct_dict.keys():
+        construct_dict[key] = torch.Tensor(construct_dict[key]).long()
+    return construct_dict
 
 
 class MTurk1BehaviorData:
@@ -10,35 +18,51 @@ class MTurk1BehaviorData:
     def reindex(self):
         unique_cues = self.data['Cue'].unique()
         unique_targets = self.data['object correct'].unique()
+        unique_trial_types = self.data['object correct'].unique()
         cue_reindex = {cue: i for i, cue in enumerate(sorted(unique_cues))}
         target_reindex = {target: i for i, target in enumerate(sorted(unique_targets))}
-        return cue_reindex, target_reindex
+        trial_type_reindex = {trial: i for i, trial in enumerate(sorted(unique_trial_types))}
+        return cue_reindex, target_reindex, trial_type_reindex
+
+    def get_natural_batch(self):
+        """
+        Grabs batch until a choice is repeated and runs in batch
+        :return:
+        """
+        cues = set()
+        choice = set()
+        construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trail_idx': []}
+        for i, row in self.data.iterrows():
+            cue_idx = self.cue_reindex_map[row['Cue']]
+            choice_idx = self.cue_reindex_map[row['object_selected']]
+            if cue_idx in cues and choice_idx in choice:
+                construct['batch_size'] = len(construct['cue_idx'])
+                final_batch = _tensorify_trials(copy.copy(construct))
+                construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trail_idx': []}
+                cues = set()
+                choice = set()
+                yield final_batch
+            cues.add(cue_idx)
+            choice.add(choice_idx)
+            construct['cue_idx'].append(cue_idx)
+            construct['choice_options'].append([self.target_reindex_map[row['choice1']],
+                                                self.target_reindex_map[row['choice2']],
+                                                self.target_reindex_map[row['choice3']],
+                                                self.target_reindex_map[row['choice4']]])
+            construct['choice_made'].append(self.target_reindex_map[row['object selected']])
+            construct['correct_option'].append(self.target_reindex_map[row['object correct']])
+            construct['trail_idx'].append(self.trial_type_reindex_map[row['trial type']])
+        construct['batch_size'] = len(construct['cue_idx'])
+        yield _tensorify_trials(construct)
 
     def __init__(self, path_to_csv):
         self.data = pd.read_csv(path_to_csv, index_col='Trial')
-        expected_cols = ('Cue', 'object selected', 'object correct', 'choice1', 'choice2', 'choice3', 'choice4')
+        expected_cols = ('Cue', 'object selected', 'object correct', 'trial type', 'choice1', 'choice2', 'choice3', 'choice4')
         if False in [expc in self.data.columns for expc in expected_cols]:
             raise ValueError("All expected Cols must be in data file passed")
-        self.cue_reindex_map, self.target_reindex_map = self.reindex()
+        self.cue_reindex_map, self.target_reindex_map, self.trial_type_reindex_map = self.reindex()
         self.num_cues = len(self.cue_reindex_map)
         self.num_targets = len(self.target_reindex_map)
-
-    def __getitem__(self, item):
-        construct = namedtuple('Trial', ['cue_idx', 'choice_options', 'choice_made', 'correct_option'])
-        row = self.data.iloc[item]
-        trial = construct(self.cue_reindex_map[row['Cue']],
-                          (self.target_reindex_map[row['choice1']],
-                           self.target_reindex_map[row['choice2']],
-                           self.target_reindex_map[row['choice3']],
-                           self.target_reindex_map[row['choice4']]),
-                          self.target_reindex_map[row['object selected']],
-                          self.target_reindex_map[row['object correct']])
-        return trial
-
-    def __iter__(self):
-        for i in range(len(self.data)):
-            trial = self[i]
-            yield trial
 
 
 if __name__ == '__main__':
