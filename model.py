@@ -1,5 +1,5 @@
 import torch
-from torch.utils import data
+torch.autograd.set_detect_anomaly(True)
 
 
 class MT1QL:
@@ -30,28 +30,28 @@ class MT1QL:
         """
         Q = self.q_init.clone()
         count = 0
-        loglikelihood = 0
+        likelihood = 0
         for trial in trial_data:
             lr = self.lrs[trial.cue_idx]
             temp = self.temps[trial.cue_idx]
-            option_exp = Q[trial.cue_idx, trial.choice_options]
+            option_exp = Q[trial.cue_idx, trial.choice_options].clone()
             choice_probs = self.softmax(temp * option_exp)
-            c_prob = choice_probs(trial.choice_options.index(trial.choice_made))
-            loglikelihood = loglikelihood + torch.log(c_prob)
+            c_prob = choice_probs[trial.choice_options.index(trial.choice_made)].clone()
+            likelihood = likelihood + c_prob
 
             reward = float(trial.correct_option == trial.choice_made)
             max_exp_reward = torch.max(option_exp)
 
-            Q[trial.cue_idx,
-              trial.choice_made] = (1 - lr) * Q[trial.cue_idx,
-                                                trial.choice_made] + lr * (reward + max_exp_reward)
+            Q.data[trial.cue_idx,
+                   trial.choice_made] = (1 - lr) * Q[trial.cue_idx,
+                                                     trial.choice_made].clone() + lr * (reward + max_exp_reward)
             count += 1
         if not grad:
-            loglikelihood.detach().clone() / count
+            likelihood.detach().clone() / count
         else:
-            return loglikelihood / count
+            return likelihood / count
 
-    def fit(self, trial_data: data.DataLoader, epochs=1000):
+    def fit(self, trial_data, epochs=1000):
         """
         :param trial_data: see predict
         :param epochs: number of epochs to run
@@ -61,9 +61,9 @@ class MT1QL:
         for epoch in range(epochs):
             print('**********\nEPOCH', epoch)
             self.optim.zero_grad()
-            ll = self.predict(trial_data, grad=True)
-            epoch_loss.append(ll.detach().item())
-            (-1 * ll).backward()  # we're minimizing
+            like = self.predict(trial_data, grad=True)
+            epoch_loss.append(like.detach().item())
+            (-1 * like).backward()  # we're minimizing
             print('loss', epoch_loss[-1], '\nlearning rates: ', self.lrs, '**********')
             self.optim.step()
         return epoch_loss
