@@ -14,7 +14,7 @@ class MT1QL:
                                                       mean=(1 / num_targets),
                                                       std=(1 / num_targets) * .2,
                                                       device=self.device))
-        self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=.1, std=.02, device=self.device))
+        self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=.01, std=.002, device=self.device))
         self.temps = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=2, std=.2, device=self.device))
         self.softmax = torch.nn.Softmax()
         self.optim = torch.optim.Adam(lr=.01, params=[self.lrs] + [self.temps] + [self.q_init])
@@ -40,18 +40,17 @@ class MT1QL:
                 choice_probs = self.softmax(temp * option_exp)
                 is_choice = torch.eq(trial_batch['choice_made'], trial_batch['choice_options'])
                 c_prob = choice_probs[is_choice].clone()
-                likelihood = torch.sum(torch.log(c_prob))
+                likelihood = torch.mean(c_prob)
                 reward = torch.eq(trial_batch['correct_option'], trial_batch['choice_made']).squeeze().float()
-                # max_exp_reward = torch.max(option_exp, dim=1)[0]
                 current_value = Q[trial_batch['cue_idx'].squeeze(), trial_batch['choice_made'].squeeze()].clone()
                 Q[trial_batch['cue_idx'].squeeze(), trial_batch['choice_made'].squeeze()] = current_value + lr * (reward - current_value)
                 count += 1
                 lepoch = lepoch + likelihood
-            print('liklihood', lepoch,
+            print('liklihood', lepoch / count,
                   '\nlearning rates', self.lrs,
                   '\ntemperatures', self.temps,
                   '\n**********')
-            epoch_loss.append(lepoch.detach().item())
+            epoch_loss.append(lepoch.detach().item() / count)
             (lepoch * -1).backward()
             self.optim.step()
             if (epoch % 10) == 0:
