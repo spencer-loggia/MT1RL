@@ -4,9 +4,9 @@ import copy
 import torch
 
 
-def _tensorify_trials(construct_dict):
+def _tensorify_trials(construct_dict, device):
     for key in construct_dict.keys():
-        construct_dict[key] = torch.Tensor(construct_dict[key]).long()
+        construct_dict[key] = torch.Tensor(construct_dict[key]).long().to(device)
         if len(construct_dict[key].shape) == 1:
             construct_dict[key] = construct_dict[key].reshape(-1, 1)
     return construct_dict
@@ -20,7 +20,7 @@ class MTurk1BehaviorData:
     def reindex(self):
         unique_cues = self.data['Cue'].unique()
         unique_targets = self.data['object correct'].unique()
-        unique_trial_types = self.data['object correct'].unique()
+        unique_trial_types = self.data['Task type'].unique()
         cue_reindex = {cue: i for i, cue in enumerate(sorted(unique_cues))}
         target_reindex = {target: i for i, target in enumerate(sorted(unique_targets))}
         trial_type_reindex = {trial: i for i, trial in enumerate(sorted(unique_trial_types))}
@@ -34,11 +34,12 @@ class MTurk1BehaviorData:
         cues = set()
         choice = set()
         construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
-        for i, row in self.data.iterrows():
+        for i in range(int(len(self.data) * .7)):
+            row = self.data.iloc[i]
             cue_idx = self.cue_reindex_map[row['Cue']]
             choice_idx = self.cue_reindex_map[row['object selected']]
             if cue_idx in cues and choice_idx in choice:
-                final_batch = _tensorify_trials(copy.copy(construct))
+                final_batch = _tensorify_trials(copy.copy(construct), device=self.device)
                 construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
                 cues = set()
                 choice = set()
@@ -53,9 +54,9 @@ class MTurk1BehaviorData:
             construct['choice_made'].append(choice_idx)
             construct['correct_option'].append(self.target_reindex_map[row['object correct']])
             construct['trial_type'].append(self.trial_type_reindex_map[row['Task type']])
-        yield _tensorify_trials(construct)
+        yield _tensorify_trials(construct, device=self.device)
 
-    def __init__(self, path_to_csv):
+    def __init__(self, path_to_csv, dev='cuda'):
         self.data = pd.read_csv(path_to_csv, index_col='Trial')
         expected_cols = ('Cue', 'object selected', 'object correct', 'Task type', 'choice1', 'choice2', 'choice3', 'choice4')
         if False in [expc in self.data.columns for expc in expected_cols]:
@@ -64,6 +65,7 @@ class MTurk1BehaviorData:
         self.num_cues = len(self.cue_reindex_map)
         self.num_targets = len(self.target_reindex_map)
         self.num_trial_types = len(self.trial_type_reindex_map)
+        self.device = torch.device(dev)
 
 
 if __name__ == '__main__':
