@@ -34,7 +34,7 @@ class MTurk1BehaviorData:
         cues = set()
         choice = set()
         construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
-        for i in range(int(len(self.data) * .7)):
+        for i in range(int(len(self.data))):
             row = self.data.iloc[i]
             cue_idx = self.cue_reindex_map[row['Cue']]
             choice_idx = self.cue_reindex_map[row['object selected']]
@@ -55,6 +55,21 @@ class MTurk1BehaviorData:
             construct['correct_option'].append(self.target_reindex_map[row['object correct']])
             construct['trial_type'].append(self.trial_type_reindex_map[row['Task type']])
         yield _tensorify_trials(construct, device=self.device)
+
+    def __iter__(self):
+        for i in range(int(len(self.data))):
+            row = self.data.iloc[i]
+            cue_idx = self.cue_reindex_map[row['Cue']]
+            choice_idx = self.cue_reindex_map[row['object selected']]
+            construct = {'cue_idx': [cue_idx],
+                         'choice_options': [[self.target_reindex_map[row['choice1']],
+                                             self.target_reindex_map[row['choice2']],
+                                             self.target_reindex_map[row['choice3']],
+                                             self.target_reindex_map[row['choice4']]]],
+                         'choice_made': [choice_idx],
+                         'correct_option': [self.target_reindex_map[row['object correct']]],
+                         'trial_type': [self.trial_type_reindex_map[row['Task type']]]}
+            yield _tensorify_trials(construct, device=self.device)
 
     def __init__(self, path_to_csv, dev='cuda'):
         self.data = pd.read_csv(path_to_csv, index_col='Trial')
