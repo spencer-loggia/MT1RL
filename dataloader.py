@@ -34,7 +34,7 @@ class MTurk1BehaviorData:
         cues = set()
         choice = set()
         construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
-        for i in range(int(len(self.data))):
+        for i in range(55000):
             row = self.data.iloc[i]
             cue_idx = self.cue_reindex_map[row['Cue']]
             choice_idx = self.cue_reindex_map[row['object selected']]

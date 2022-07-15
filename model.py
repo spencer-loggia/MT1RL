@@ -1,6 +1,7 @@
 import os.path
 
 import torch
+import numpy as np
 import pickle
 
 
@@ -10,6 +11,7 @@ class MT1QL:
         :param num_cues: number of cue options
         :param num_targets: number of target options
         """
+        self.trial_types = num_trial_types
         self.device = torch.device(dev)
         self.q_init = torch.nn.Parameter(torch.normal(size=(num_cues, num_targets),
                                                       mean=(1 / num_targets),
@@ -22,14 +24,14 @@ class MT1QL:
 
     def predict(self, trial_data):
         """
-        make choices as the model would. Return model correct / incorrect over trials, and probability of monkeys choice
-        over trials
+        make choices as the model would seperated by task type. Return model correct / incorrect over trials, probability
+        of monkeys choice over trials, and Q matrix over time.
         :return:
         """
-        choice_made_prob = []
+        choice_made_prob = [[] for _ in range(self.trial_types)]
         all_Q = []
         with torch.no_grad():
-            Q = self.q_init.clone()
+            Q = torch.abs(self.q_init.clone())
             all_Q.append(Q)
             for trial in trial_data:
                 lr = self.lrs[trial['trial_type']].clone().squeeze()  # size batch
@@ -38,13 +40,13 @@ class MT1QL:
                 choice_probs = self.softmax(temp * option_exp)
                 is_choice = torch.eq(trial['choice_made'], trial['choice_options'])
                 c_prob = choice_probs[is_choice].clone()
-                choice_made_prob.append(c_prob.detach().item())
+                choice_made_prob[trial['trial_type'].squeeze()].append(c_prob.cpu().detach().item())
                 reward = torch.eq(trial['correct_option'], trial['choice_made']).squeeze().float()
                 current_value = Q[trial['cue_idx'].squeeze(), trial['choice_made'].squeeze()].clone()
                 Q[trial['cue_idx'].squeeze(), trial['choice_made'].squeeze()] = current_value + lr * (
                             reward - current_value)
-                all_Q.append(Q)
-        return choice_made_prob, all_Q
+                all_Q.append(Q.clone())
+        return np.array(choice_made_prob), torch.stack(all_Q).cpu().numpy()
 
     def fit(self, trial_data, epochs=1000, snap_out_dir='./'):
         """
@@ -57,7 +59,7 @@ class MT1QL:
         for epoch in range(epochs):
             print('**********\nEPOCH', epoch)
             self.optim.zero_grad()
-            Q = self.q_init.clone()
+            Q = torch.abs(self.q_init.clone())
             count = 0
             lepoch = torch.Tensor([0.]).to(self.device)
             for trial_batch in trial_data.get_natural_batch():
