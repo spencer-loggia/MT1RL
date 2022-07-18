@@ -43,7 +43,7 @@ class MT1QL:
         if combine_likelihoods:
             likelihoods = torch.Tensor([0.]).to(self.device)
         else:
-            likelihoods = [list()]*self.trial_types
+            likelihoods = [list() for _ in range(self.trial_types)]
         if batch:
             iter = trial_data.get_natural_batch
         else:

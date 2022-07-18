@@ -18,13 +18,19 @@ class MTurk1BehaviorData:
     dataloader to run through mturk1 data
     """
     def reindex(self):
-        unique_cues = self.data['Cue'].unique()
-        unique_targets = self.data['object correct'].unique()
+        index_map = {}
         unique_trial_types = self.data['Task type'].unique()
-        cue_reindex = {cue: i for i, cue in enumerate(sorted(unique_cues))}
-        target_reindex = {target: i for i, target in enumerate(sorted(unique_targets))}
         trial_type_reindex = {trial: i for i, trial in enumerate(sorted(unique_trial_types))}
-        return cue_reindex, target_reindex, trial_type_reindex
+        for key in trial_type_reindex.keys():
+            idx = trial_type_reindex[key]
+            index_map[idx] = {}
+            trial_data = self.data.loc[self.data['Task type'] == key]
+            unique_cues = trial_data['Cues'].unique()
+            unique_targets = trial_data['object correct'].unique()
+            index_map[idx]['cues'] = {cue: i for i, cue in enumerate(sorted(unique_cues))}
+            index_map[idx]['targets'] = {target: i for i, target in enumerate(sorted(unique_targets))}
+
+        return trial_type_reindex, index_map
 
     def get_natural_batch(self):
         """
