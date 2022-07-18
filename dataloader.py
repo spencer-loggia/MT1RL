@@ -71,7 +71,10 @@ class MTurk1BehaviorData:
                          'trial_type': [self.trial_type_reindex_map[row['Task type']]]}
             yield _tensorify_trials(construct, device=self.device)
 
-    def __init__(self, path_to_csv, dev='cuda'):
+    def __repr__(self):
+        return self.name
+
+    def __init__(self, path_to_csv, dataset_name, dev='cuda'):
         self.data = pd.read_csv(path_to_csv, index_col='Trial')
         expected_cols = ('Cue', 'object selected', 'object correct', 'Task type', 'choice1', 'choice2', 'choice3', 'choice4')
         if False in [expc in self.data.columns for expc in expected_cols]:
@@ -81,6 +84,7 @@ class MTurk1BehaviorData:
         self.num_targets = len(self.target_reindex_map)
         self.num_trial_types = len(self.trial_type_reindex_map)
         self.device = torch.device(dev)
+        self.name = str(dataset_name)
 
 
 if __name__ == '__main__':
