@@ -16,15 +16,15 @@ class MT1QL:
         """
         self.trial_types = num_trial_types
         self.device = torch.device(dev)
-        self.q_init = torch.nn.Parameter(torch.normal(size=(num_cues, num_targets),
-                                                      mean=(1 / num_targets),
-                                                      std=(1 / num_targets) * .2,
-                                                      device=self.device))
+        self.q_init = [torch.nn.Parameter(torch.normal(size=(num_cues[i], num_targets[i]),
+                                                      mean=(1 / num_targets[i]),
+                                                      std=(1 / num_targets[i]) * .2,
+                                                      device=self.device)) for i in range(num_trial_types)]
         self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=.01, std=.002, device=self.device))
         self.temps = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=2, std=.2, device=self.device))
         self.softmax = torch.nn.Softmax()
         self.sigmoid = torch.nn.Sigmoid()
-        self.optim = torch.optim.Adam(lr=.01, params=[self.lrs] + [self.temps] + [self.q_init])
+        self.optim = torch.optim.Adam(lr=.01, params=[self.lrs] + [self.temps] + self.q_init)
         self.save_dir = save_dir
 
     def to(self, device):
@@ -37,8 +37,8 @@ class MT1QL:
         self.temps = self.temps.to(self.device)
 
     def learn_loop(self, trial_data, batch=True, combine_likelihoods=True):
-        q_init = self.q_init.clone()
-        Q = self.sigmoid(q_init).clone()
+        q_init = [q.clone() for q in self.q_init]
+        Q = [self.sigmoid(q).clone() for q in q_init]
         count = 0
         if combine_likelihoods:
             likelihoods = torch.Tensor([0.]).to(self.device)
@@ -49,9 +49,10 @@ class MT1QL:
         else:
             iter = trial_data.__iter__
         for trial_batch in iter():
-            lr = torch.abs(self.lrs[trial_batch['trial_type']].clone().squeeze())  # size batch
-            temp = torch.abs(self.temps[trial_batch['trial_type']].clone())
-            option_exp = Q[trial_batch['cue_idx'], trial_batch['choice_options']].clone()
+            trial_type = trial_batch['trial_type']
+            lr = torch.abs(self.lrs[trial_type].clone().squeeze())  # size batch
+            temp = torch.abs(self.temps[trial_type].clone())
+            option_exp = Q[trial_type][trial_batch['cue_idx'], trial_batch['choice_options']].clone()
             choice_probs = self.softmax(temp * option_exp)
             is_choice = torch.eq(trial_batch['choice_made'], trial_batch['choice_options'])
             c_prob = choice_probs[is_choice].clone()
@@ -61,8 +62,8 @@ class MT1QL:
             else:
                 likelihoods[trial_batch['trial_type']].append(likelihood.detach().cpu().item())
             reward = torch.eq(trial_batch['correct_option'], trial_batch['choice_made']).squeeze().float()
-            current_value = Q[trial_batch['cue_idx'].squeeze(), trial_batch['choice_made'].squeeze()].clone()
-            Q[trial_batch['cue_idx'].squeeze(), trial_batch['choice_made'].squeeze()] = current_value + lr * (
+            current_value = Q[trial_type][trial_batch['cue_idx'].squeeze(), trial_batch['choice_made'].squeeze()].clone()
+            Q[trial_type][trial_batch['cue_idx'].squeeze(), trial_batch['choice_made'].squeeze()] = current_value + lr * (
                         reward - current_value)
             count += 1
         if combine_likelihoods:
