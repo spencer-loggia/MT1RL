@@ -5,25 +5,20 @@ import pandas as pd
 
 file_base = sys.argv[1]
 
-og_mapping = {"low_gauss_shape_to_color": {"task": (1,),
-                                           "cues_min_max": (0, 14)},
-              "focal_low_gauss_shape_to_color": {"task": (2,),
-                                                 "cues_min_max": (0, 14)},
-              "high_gauss_shape_to_color": {"task": (1,),
-                                            "cues_min_max": (14, 28)},
-              "focal_high_gauss_shape_to_color": {"task": (2,),
-                                                  "cues_min_max": (14, 28)},
-              "low_gauss_color_to_shape": {"task": (3,),
-                                           "cues_min_max": (0, 14)},
-              "focal_low_gauss_color_to_shape": {"task": (4,),
-                                                 "cues_min_max": (0, 14)},
-              "high_gauss_color_to_shape": {"task": (3,),
-                                            "cues_min_max": (14, 28)},
-              "focal_high_gauss_color_to_shape": {"task": (4,),
-                                                  "cues_min_max": (14, 28)},
-              "achromatic_shape_to_shape": {"task": (6,),
-                                            "cues_min_max": (0, 28)}}
-
+og_mapping = {
+    "low_guass_colored_shape_to_color": {"task": (1,),
+                                         "cues_min_max": (0, 14)},
+    "high_guass_colored_shape_to_color": {"task": (1,),
+                                          "cues_min_max": (14, 28)},
+    "low_guass_colored_shape_to_shape": {"task": (2,),
+                                         "cues_min_max": (0, 14)},
+    "high_guass_colored_shape_to_shape": {"task": (2,),
+                                          "cues_min_max": (14, 28)},
+    "achromatic_shape_to_shape": {"task": (3,),
+                                  "cues_min_max": (0, 28)},
+    "color_to_color": {"task": (4,),
+                       "cues_min_max": (0, 28)}
+}
 subjects = ['jeeves', 'wooster', 'jocamo']
 
 for subject in subjects:
@@ -38,17 +33,16 @@ for subject in subjects:
     We want the following to have UNIQUE Cues: uncolored shapes, high_gauss_shapes, colors, high gauss colors, achromatic shapes
     They can all map to 28 targets w/o overlap 
     """
+
     new_task = 1
     new_dfs = []
     max_cue = 0
-
     for desired_task in og_mapping.keys():
         task_data = data.loc[(data['Task type'].isin(og_mapping[desired_task]['task'])) &
                              (data['Cue'] >= og_mapping[desired_task]['cues_min_max'][0]) &
                              (data['Cue'] < og_mapping[desired_task]['cues_min_max'][1])]
         task_data["Cue"] += (max_cue + 1)
         max_cue = max(max_cue, max(task_data['Cue']))
-        min_target = min(task_data['object correct'])
         task_data['Task type'] = new_task
         task_name_col = [desired_task] * len(task_data)
         task_data['task name'] = task_name_col
