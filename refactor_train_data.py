@@ -41,7 +41,8 @@ for subject in subjects:
         task_data = data.loc[(data['Task type'].isin(og_mapping[desired_task]['task'])) &
                              (data['Cue'] >= og_mapping[desired_task]['cues_min_max'][0]) &
                              (data['Cue'] < og_mapping[desired_task]['cues_min_max'][1])]
-        task_data["Cue"] += (max_cue + 1)
+        local_min = min(task_data['Cue'])
+        task_data["Cue"] += (max_cue + 1 - local_min)
         max_cue = max(max_cue, max(task_data['Cue']))
         task_data['Task type'] = new_task
         task_name_col = [desired_task] * len(task_data)

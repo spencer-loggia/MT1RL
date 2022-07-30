@@ -31,21 +31,21 @@ class MTurk1BehaviorData:
         Grabs batch until a choice is repeated and runs in batch
         :return:
         """
-        cues = set()
-        choice = set()
+        seen = set()
         construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
         for i in range(self.trials_to_load):
             row = self.data.iloc[i]
             cue_idx = self.cue_reindex_map[row['Cue']]
             choice_idx = self.target_reindex_map[row['object selected']]
-            if cue_idx in cues and choice_idx in choice:
+            trial_type = self.trial_type_reindex_map[row['Task type']]
+            tup = (cue_idx, trial_type)
+            if tup in seen:
                 final_batch = _tensorify_trials(copy.copy(construct), device=self.device)
                 construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
-                cues = set()
-                choice = set()
+                seen = set()
+                seen.add(tup)
                 yield final_batch
-            cues.add(cue_idx)
-            choice.add(choice_idx)
+            seen.add(tup)
             if self.is_4afc:
                 construct['cue_idx'].append(cue_idx)
                 construct['choice_options'].append([self.target_reindex_map[row['choice1']],
