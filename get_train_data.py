@@ -29,10 +29,10 @@ for subject in subjects:
         if subject in file.lower() and '.txt' in file and task_key in file:
             print(subject, file)
             if is_2afc:
-                session_df = pd.DataFrame(columns=['Cue', 'Task type', 'object correct', 'object selected', 'choice1', 'choice2'])
+                session_df = pd.DataFrame(columns=['Cue', 'Task type', 'object correct', 'object selected', 'color degree', 'choice1', 'choice2'])
             else:
                 session_df = pd.DataFrame(
-                    columns=['Cue', 'Task type', 'object correct', 'object selected', 'choice1', 'choice2', 'choice3', 'choice4'])
+                    columns=['Cue', 'Task type', 'object correct', 'object selected', 'color degree', 'choice1', 'choice2', 'choice3', 'choice4'])
             with open(os.path.join(data_dir, file), 'r') as f:
                 data_dict = json.load(f)[0]
             sample = data_dict['Sample']
@@ -45,6 +45,7 @@ for subject in subjects:
                 session_df['Cue'] = np.array(sample)[good_resp_index]
                 object_selected = [options[data_dict['Response'][i]] for i, options in enumerate(data_dict['Test']) if good_resp_index[i]]
                 object_correct = [options[data_dict['CorrectItem'][i]] for i, options in enumerate(data_dict['Test']) if good_resp_index[i]]
+                color_degrees = np.array(data_dict['SampleC'])[good_resp_index]
                 choices = np.array(list(zip(*data_dict['Test'])))[:, good_resp_index]
             except Exception:
                 print(subject, "session #", len(base_dfs), "corrupted. skipping...")
@@ -52,6 +53,7 @@ for subject in subjects:
             session_df['Task type'] = task_type
             session_df['object selected'] = object_selected
             session_df['object correct'] = object_correct
+            session_df['color degree'] = color_degrees
             session_df['choice1'] = choices[0]
             session_df['choice2'] = choices[1]
             if not is_2afc:

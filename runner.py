@@ -13,6 +13,16 @@ from sklearn.metrics import confusion_matrix
 
 import pickle
 
+color_vals = [[235,141,202,122,141,86,86,50,157,95,227,136,186,113],
+          [139,84,166,102,186,114,188,115,163,102,133,82,166,102],
+          [167,97,90,52,123,72,205,119,254,149,240,139,187,109]]
+color_vals = (np.array(color_vals) / 255).T
+
+
+color_names = ["LightRed", "DarkRed", "LightYellow", "DarkYellow", "LightGreen", "DarkGreen",
+               "LightTurquiose", "DarkTurquiose", "LightBlue", "DarkBlue", "LightPurple", "DarkPurple"]
+
+
 probe_data_map = {"low_gauss_shape_to_color": {"task": (1,),
                                            "cues_min_max": (0, 14)},
               "focal_low_gauss_shape_to_color": {"task": (2,),
@@ -174,12 +184,28 @@ class ExperimentManager:
         for s, dataset in self.datasets:
             for task, task_name in enumerate(self.task_keys):
                 task_data = dataset.data.loc[dataset['Task type'] == task]
-                correct = task_data['object correct'].numpy()
-                selected = task_data['object selected'].numpy()
+                correct = task_data['object correct'].numpy()[trial_start:trial_stop]
+                selected = task_data['object selected'].numpy()[trial_start:trial_stop]
                 conf = confusion_matrix(correct, selected)
                 axs[s, task].imshow(conf)
                 axs[s, task].set_title(str(dataset) + ': ' + task_name)
         return axs
+
+    def plot_cue_color_degree_frequencies(self, axs):
+        for s, dataset in enumerate(self.datasets):
+            if self.is_train:
+                task_data = dataset.data.loc[dataset.data['Task type'].isin((1, 2, 3, 4, 6))]
+            else:
+                raise NotImplementedError
+            for idx, color_val in enumerate(color_vals):
+                cue_data = task_data.loc[task_data["Cue"] == idx]
+                colors = cue_data['color degree'].to_numpy()
+                axs[s].hist(colors, bins=360, color=color_val, alpha=.25)
+        return axs
+    #
+    # def plot_selected_color_degree_frequencies(self, axs, trial_start, trial_stop):
+    #     if task_types is None:
+    #         task_types = list(range(len(self.task_keys)))
 
     def load(self, handle: List[str]):
         if isinstance(handle, str):
