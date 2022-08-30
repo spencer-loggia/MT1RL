@@ -9,19 +9,26 @@ import sys
 
 
 class MT1QL:
-    def __init__(self, num_cues, num_targets, num_trial_types, save_dir, dev='cuda'):
+    def __init__(self, num_cues, num_targets, num_trial_types, save_dir, unique_lrs=False, dev='cuda'):
         """
         :param num_cues: number of cue options
         :param num_targets: number of target options
         """
         self.trial_types = num_trial_types
         self.device = torch.device(dev)
-        self.q_init = torch.nn.Parameter(torch.normal(size=(num_cues, num_targets),
+        self.q_init = torch.nn.Parameter(torch.normal(size=(num_trial_types, num_cues, num_targets),
                                                       mean=(1 / num_targets),
                                                       std=(1 / num_targets) * .2,
                                                       device=self.device))
-        self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=.01, std=.002, device=self.device))
-        self.temps = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=2, std=.2, device=self.device))
+        if unique_lrs:
+            self.lrs = torch.nn.Parameter(
+                torch.normal(size=(num_trial_types, num_cues), mean=.1, std=.005, device=self.device))
+            self.temps = torch.nn.Parameter(
+                torch.normal(size=(num_trial_types, num_cues), mean=3, std=.2, device=self.device))
+        else:
+            self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=.1, std=.005, device=self.device))
+            self.temps = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=2, std=.2, device=self.device))
+        self.unique_lrs = unique_lrs
         self.softmax = torch.nn.Softmax()
         self.sigmoid = torch.nn.Sigmoid()
         self.optim = torch.optim.Adam(lr=.01, params=[self.lrs] + [self.temps] + [self.q_init])
@@ -50,9 +57,13 @@ class MT1QL:
         else:
             iter = trial_data.__iter__
         for trial_batch in iter():
-            lr = torch.abs(self.lrs[trial_batch['trial_type']].clone())  # size batch
-            temp = torch.abs(self.temps[trial_batch['trial_type']].clone())
-            option_exp = Q[trial_batch['cue_idx'], trial_batch['choice_options']].clone()
+            if self.unique_lrs:
+                lr = torch.abs(self.lrs[trial_batch['trial_type'], trial_batch['cue_idx']].clone())  # size batch
+                temp = torch.abs(self.temps[trial_batch['trial_type'], trial_batch['cue_idx']].clone())
+            else:
+                lr = torch.abs(self.lrs[trial_batch['trial_type']].clone())
+                temp = torch.abs(self.temps[trial_batch['trial_type']].clone())
+            option_exp = Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_options']].clone()
             choice_probs = self.softmax(temp * option_exp)
             is_choice = torch.eq(trial_batch['choice_made'], trial_batch['choice_options'])
             c_prob = choice_probs[is_choice].clone()
@@ -62,9 +73,9 @@ class MT1QL:
             else:
                 likelihoods[trial_batch['trial_type']].append(likelihood.detach().cpu().item())
             reward = torch.eq(trial_batch['correct_option'], trial_batch['choice_made']).float()
-            current_value = Q[trial_batch['cue_idx'], trial_batch['choice_made']].clone()
-            Q[trial_batch['cue_idx'], trial_batch['choice_made']] = current_value + lr * (
-                        reward - current_value)
+            current_value = Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_made']].clone()
+            Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_made']] = current_value + lr * (
+                    reward - current_value)
             if sameple_q is not None and (count % sameple_q) == 0:
                 q_sample.append(Q.cpu().detach().numpy().reshape((-1, 14, 28)))
             count += 1
@@ -91,7 +102,7 @@ class MT1QL:
             rewarded[trial_batch['trial_type']].append(reward.detach().cpu().item())
             current_value = Q[trial_batch['cue_idx'], choice_made].clone()
             Q[trial_batch['cue_idx'], choice_made] = current_value + lr * (
-                        reward - current_value)
+                    reward - current_value)
             if sample_q is not None and (count % sample_q) == 0:
                 q_sample.append(Q.cpu().detach().numpy().reshape((-1, 14, 28)))
             count += 1
@@ -117,20 +128,26 @@ class MT1QL:
         :param dev: device to optmize on
         :return:
         """
+        print("starting model...", trial_data.name)
+        print("Trial types...", self.q_init.shape[0])
+        print("Cues per trial...", self.q_init.shape[1])
+        print("Options per cue...", self.q_init.shape[2])
+        print("LR tensor shape...", self.lrs.shape)
+        print("Temperature shape...", self.temps.shape)
         epoch_loss = []
         for epoch in range(epochs):
             print("**********\n", str(trial_data), "EPOCH", epoch)
             self.optim.zero_grad()
             lepoch = self.learn_loop(trial_data, batch=True)
             print('liklihood', lepoch,
-                  '\nlearning rates', self.lrs,
-                  '\ntemperatures', self.temps,
                   '\n**********')
             epoch_loss.append(lepoch.cpu().detach().item())
             (lepoch * -1).backward()
             self.optim.step()
             if (epoch % 10) == 0:
-                if len(epoch_loss) > 5 and abs(epoch_loss[-2] - epoch_loss[-1]) < .1:
+                if epoch == epochs - 1 or \
+                        (len(epoch_loss) > 5 and abs(epoch_loss[-1]) - abs(epoch_loss[-2]) < .2 and
+                         abs(epoch_loss[-2]) - abs(epoch_loss[-3]) < .2):
                     with open(os.path.join(self.save_dir, "snapshot_final_" + str(epoch) + ".pkl"), 'wb') as f:
                         pickle.dump(self, f)
                     return epoch_loss
@@ -143,6 +160,7 @@ class MT1QL:
 if __name__ == '__main__':
     from dataloader import MTurk1BehaviorData
     import sys
+
     jeeves_probe_no_high_gauss_data = MTurk1BehaviorData(sys.argv[1])
     jeeves_probe = MT1QL(num_cues=jeeves_probe_no_high_gauss_data.num_cues,
                          num_targets=jeeves_probe_no_high_gauss_data.num_targets,

@@ -35,9 +35,9 @@ class MTurk1BehaviorData:
         construct = {'cue_idx': [], 'choice_options': [], 'choice_made': [], 'correct_option': [], 'trial_type': []}
         for i in range(self.trials_to_load):
             row = self.data.iloc[i]
-            cue_idx = self.cue_reindex_map[row['Cue']]
-            choice_idx = self.target_reindex_map[row['object selected']]
-            trial_type = self.trial_type_reindex_map[row['Task type']]
+            cue_idx = row['Cue']
+            choice_idx = row['object selected']
+            trial_type = row['Task type']
             tup = (cue_idx, trial_type)
             if tup in seen:
                 final_batch = _tensorify_trials(copy.copy(construct), device=self.device)
@@ -48,43 +48,43 @@ class MTurk1BehaviorData:
             seen.add(tup)
             if self.is_4afc:
                 construct['cue_idx'].append(cue_idx)
-                construct['choice_options'].append([self.target_reindex_map[row['choice1']],
-                                                    self.target_reindex_map[row['choice2']],
-                                                    self.target_reindex_map[row['choice3']],
-                                                    self.target_reindex_map[row['choice4']]])
+                construct['choice_options'].append([row['choice1'],
+                                                    row['choice2'],
+                                                    row['choice3'],
+                                                    row['choice4']])
                 construct['choice_made'].append(choice_idx)
-                construct['correct_option'].append(self.target_reindex_map[row['object correct']])
-                construct['trial_type'].append(self.trial_type_reindex_map[row['Task type']])
+                construct['correct_option'].append(row['object correct'])
+                construct['trial_type'].append(row['Task type'])
             else:
                 construct['cue_idx'].append(cue_idx)
-                construct['choice_options'].append([self.target_reindex_map[row['choice1']],
-                                                    self.target_reindex_map[row['choice2']]])
+                construct['choice_options'].append([row['choice1'],
+                                                    row['choice2']])
                 construct['choice_made'].append(choice_idx)
-                construct['correct_option'].append(self.target_reindex_map[row['object correct']])
-                construct['trial_type'].append(self.trial_type_reindex_map[row['Task type']])
+                construct['correct_option'].append(row['object correct'])
+                construct['trial_type'].append(row['Task type'])
         yield _tensorify_trials(construct, device=self.device)
 
     def __iter__(self):
         for i in range(int(len(self.data))):
             row = self.data.iloc[i]
             cue_idx = self.cue_reindex_map[row['Cue']]
-            choice_idx = self.target_reindex_map[row['object selected']]
+            choice_idx = row['object selected']
             if self.is_4afc:
                 construct = {'cue_idx': [cue_idx],
-                             'choice_options': [[self.target_reindex_map[row['choice1']],
-                                                 self.target_reindex_map[row['choice2']],
-                                                 self.target_reindex_map[row['choice3']],
-                                                 self.target_reindex_map[row['choice4']]]],
+                             'choice_options': [[row['choice1'],
+                                                 row['choice2'],
+                                                 row['choice3'],
+                                                 row['choice4']]],
                              'choice_made': [choice_idx],
-                             'correct_option': [self.target_reindex_map[row['object correct']]],
-                             'trial_type': [self.trial_type_reindex_map[row['Task type']]]}
+                             'correct_option': [row['object correct']],
+                             'trial_type': [row['Task type']]}
             else:
                 construct = {'cue_idx': [cue_idx],
-                             'choice_options': [[self.target_reindex_map[row['choice1']],
-                                                 self.target_reindex_map[row['choice2']]]],
+                             'choice_options': [[row['choice1'],
+                                                 row['choice2']]],
                              'choice_made': [choice_idx],
-                             'correct_option': [self.target_reindex_map[row['object correct']]],
-                             'trial_type': [self.trial_type_reindex_map[row['Task type']]]}
+                             'correct_option': [row['object correct']],
+                             'trial_type': [row['Task type']]}
             yield _tensorify_trials(construct, device=self.device)
 
     def __repr__(self):
@@ -102,10 +102,9 @@ class MTurk1BehaviorData:
             expected_cols = ('Cue', 'object selected', 'object correct', 'Task type', 'choice1', 'choice2')
         if False in [expc in self.data.columns for expc in expected_cols]:
             raise ValueError("All expected Cols must be in data file passed")
-        self.cue_reindex_map, self.target_reindex_map, self.trial_type_reindex_map = self.reindex()
-        self.num_cues = len(self.cue_reindex_map)
-        self.num_targets = len(self.target_reindex_map)
-        self.num_trial_types = len(self.trial_type_reindex_map)
+        self.num_cues = 14
+        self.num_targets = 28
+        self.num_trial_types = self.data['Task type'].nunique()
         self.device = torch.device(dev)
         self.name = str(dataset_name)
 

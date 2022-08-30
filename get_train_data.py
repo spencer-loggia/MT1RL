@@ -43,6 +43,7 @@ for subject in subjects:
                 good_resp_index = resp != None
                 task_type = np.array(data_dict['Routine'])[good_resp_index]
                 session_df['Cue'] = np.array(sample)[good_resp_index]
+                selected_degrees = [c_options[resp[i]] for i, c_options in enumerate(data_dict['TestC']) if good_resp_index[i]]
                 object_selected = [options[data_dict['Response'][i]] for i, options in enumerate(data_dict['Test']) if good_resp_index[i]]
                 object_correct = [options[data_dict['CorrectItem'][i]] for i, options in enumerate(data_dict['Test']) if good_resp_index[i]]
                 color_degrees = np.array(data_dict['SampleC'])[good_resp_index]
@@ -54,6 +55,7 @@ for subject in subjects:
             session_df['object selected'] = object_selected
             session_df['object correct'] = object_correct
             session_df['color degree'] = color_degrees
+            session_df['selected degree'] = selected_degrees
             session_df['choice1'] = choices[0]
             session_df['choice2'] = choices[1]
             if not is_2afc:

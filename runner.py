@@ -3,44 +3,49 @@ import sys
 from typing import List
 
 import matplotlib.pyplot as plt
+import pandas as pd
 import torch
 import numpy as np
 from model import MT1QL
 from dataloader import MTurk1BehaviorData
 from torch.multiprocessing import Pool, set_start_method, get_start_method
+import scipy
 from scipy.ndimage import uniform_filter
 from sklearn.metrics import confusion_matrix
+from graspologic.embed import AdjacencySpectralEmbed
+from neurotools.modules import MDScale
 
 import pickle
 
-color_vals = [[235,141,202,122,141,86,86,50,157,95,227,136,186,113],
-          [139,84,166,102,186,114,188,115,163,102,133,82,166,102],
-          [167,97,90,52,123,72,205,119,254,149,240,139,187,109]]
+color_vals = [[235, 141, 202, 122, 141, 86, 86, 50, 157, 95, 227, 136, 186, 113],
+              [139, 84, 166, 102, 186, 114, 188, 115, 163, 102, 133, 82, 166, 102],
+              [167, 97, 90, 52, 123, 72, 205, 119, 254, 149, 240, 139, 187, 109]]
 color_vals = (np.array(color_vals) / 255).T
 
-
 color_names = ["LightRed", "DarkRed", "LightYellow", "DarkYellow", "LightGreen", "DarkGreen",
-               "LightTurquiose", "DarkTurquiose", "LightBlue", "DarkBlue", "LightPurple", "DarkPurple"]
+               "LightTurquiose", "DarkTurquiose", "LightBlue", "DarkBlue", "LightPurple", "DarkPurple",
+               "LightGray", "DarkGray"]
 
+expected_means_degrees = []
 
 probe_data_map = {"low_gauss_shape_to_color": {"task": (1,),
-                                           "cues_min_max": (0, 14)},
-              "focal_low_gauss_shape_to_color": {"task": (2,),
-                                                 "cues_min_max": (0, 14)},
-              "high_gauss_shape_to_color": {"task": (1,),
-                                            "cues_min_max": (14, 28)},
-              "focal_high_gauss_shape_to_color": {"task": (2,),
-                                                  "cues_min_max": (14, 28)},
-              "low_gauss_color_to_shape": {"task": (3,),
-                                           "cues_min_max": (0, 14)},
-              "focal_low_gauss_color_to_shape": {"task": (4,),
-                                                 "cues_min_max": (0, 14)},
-              "high_gauss_color_to_shape": {"task": (3,),
-                                            "cues_min_max": (14, 28)},
-              "focal_high_gauss_color_to_shape": {"task": (4,),
-                                                  "cues_min_max": (14, 28)},
-              "achromatic_shape_to_shape": {"task": (6,),
-                                            "cues_min_max": (0, 28)}
+                                               "cues_min_max": (0, 14)},
+                  "focal_low_gauss_shape_to_color": {"task": (2,),
+                                                     "cues_min_max": (0, 14)},
+                  "high_gauss_shape_to_color": {"task": (1,),
+                                                "cues_min_max": (14, 28)},
+                  "focal_high_gauss_shape_to_color": {"task": (2,),
+                                                      "cues_min_max": (14, 28)},
+                  "low_gauss_color_to_shape": {"task": (3,),
+                                               "cues_min_max": (0, 14)},
+                  "focal_low_gauss_color_to_shape": {"task": (4,),
+                                                     "cues_min_max": (0, 14)},
+                  "high_gauss_color_to_shape": {"task": (3,),
+                                                "cues_min_max": (14, 28)},
+                  "focal_high_gauss_color_to_shape": {"task": (4,),
+                                                      "cues_min_max": (14, 28)},
+                  "achromatic_shape_to_shape": {"task": (6,),
+                                                "cues_min_max": (0, 28)}
                   }
 
 train_data_map = {
@@ -56,7 +61,7 @@ train_data_map = {
                                   "cues_min_max": (0, 28)},
     "color_to_color": {"task": (4,),
                        "cues_min_max": (0, 28)}
-                }
+}
 
 
 def _fit_wrapper(model, dataset, epochs):
@@ -77,13 +82,14 @@ class ExperimentManager:
     def from_trained(cls, name, datasets, model_paths, phase):
         exp = cls(name, [], [], phase)
         exp.datasets = datasets
+        exp.color_dist = exp.compute_color_distributions()
         for mp in model_paths:
             with open(mp, "rb") as m:
                 exp.models.append(pickle.load(m))
             exp.save_dirs.append(os.path.dirname(mp))
         return exp
 
-    def __init__(self, name: str, datasets: List[MTurk1BehaviorData], save_dirs: List[str], phase):
+    def __init__(self, name: str, datasets: List[MTurk1BehaviorData], save_dirs: List[str], phase, unique_lrs=False):
         self.models = []
         if phase == 'train':
             self.is_train = True
@@ -101,12 +107,28 @@ class ExperimentManager:
         self.model_free_accuracy = None
         self.subject_real_accuracy = None
         self.subject_Q_estimates = None
-
+        self.unique_lrs = unique_lrs
         for j, dataset in enumerate(datasets):
-            self.models.append(MT1QL(dataset.num_cues, dataset.num_targets, dataset.num_trial_types, save_dirs[j]))
+            self.models.append(MT1QL(dataset.num_cues, dataset.num_targets, dataset.num_trial_types, save_dirs[j],
+                                     unique_lrs=unique_lrs))
+        self.color_dist = self.compute_color_distributions()
 
     def __repr__(self):
         return self.name
+
+    def compute_color_distributions(self, ):
+        color_dist = []
+        for s, dataset in enumerate(self.datasets):
+            color_dist.append({})
+            stds = [10, 40]
+            means = [0, 0, 60, 60, 120, 120, 180, 180, 240, 240, 300, 300, None, None]
+            for std in stds:
+                for idx, color in enumerate(color_names):
+                    if color not in color_dist[s]:
+                        color_dist[s][color] = []
+                    color_dist[s][color].append({'std': std,
+                                                 'mean': means[idx]})
+        return color_dist
 
     def fit(self, epochs=500):
         try:
@@ -128,27 +150,30 @@ class ExperimentManager:
                 selected = task_data['object selected'].to_numpy()
                 self.subject_real_accuracy[i].append((correct == selected).astype(float))
 
-    def get_subject_choice_probs(self):
-        try:
-            _set_mp_env()
-        except Exception:
-            pass
-        args = [(self.models[idx], dataset) for idx, dataset in enumerate(self.datasets)]
-        with Pool() as p:
-            res = p.starmap(_predict_wrapper, args)
-        self.subject_choice_probs, self.subject_Q_estimates = list(zip(*res))
+    def get_subject_choice_probs(self, overwrite=False):
+        if self.subject_choice_probs is None or overwrite:
+            try:
+                _set_mp_env()
+            except Exception:
+                pass
+            args = [(self.models[idx], dataset) for idx, dataset in enumerate(self.datasets)]
+            with Pool() as p:
+                res = p.starmap(_predict_wrapper, args)
+            self.subject_choice_probs, self.subject_Q_estimates = list(zip(*res))
 
-    def get_model_accuracy(self):
-        try:
-            _set_mp_env()
-        except Exception:
-            pass
-        args = [(self.models[idx], dataset, False) for idx, dataset in enumerate(self.datasets)]
-        with Pool() as p:
-            res = p.starmap(_predict_wrapper, args)
-        self.model_free_accuracy, _ = list(zip(*res))
+    def get_model_accuracy(self, overwrite=False):
+        if self.model_free_accuracy is None or overwrite:
+            try:
+                _set_mp_env()
+            except Exception:
+                pass
+            args = [(self.models[idx], dataset, False) for idx, dataset in enumerate(self.datasets)]
+            with Pool() as p:
+                res = p.starmap(_predict_wrapper, args)
+            self.model_free_accuracy, _ = list(zip(*res))
 
-    def plot_learning_curves(self, axs, trials_to_plot=50000, window_size=100, models_to_plot=None, type='subject_probs'):
+    def plot_learning_curves(self, axs, trials_to_plot=50000, window_size=100, models_to_plot=None,
+                             type='subject_probs'):
         """
         :param models_to_plot:
         :return:
@@ -180,32 +205,60 @@ class ExperimentManager:
                     ax.plot(smoothed[:min(trials_to_plot, len(smoothed))])
         return axs
 
-    def plot_subject_confusion_matrices(self, axs, trial_start, trial_stop):
-        for s, dataset in self.datasets:
+    def _get_confusion_matrix(self, task_data, standardize, error_only):
+        num_items = len(pd.unique(task_data['Cue']))
+        correct = task_data['object correct'].to_numpy()
+        correct[correct >= num_items] -= num_items
+        selected = task_data['object selected'].to_numpy()
+        selected[selected >= num_items] -= num_items
+        conf = confusion_matrix(correct, selected, labels=list(range(0, num_items)))
+        if standardize:
+            mod = (np.eye(num_items) * 5.5) + 1
+            conf = conf / mod
+        if error_only:
+            mod = np.logical_not(np.eye(num_items))
+            conf = conf * mod
+        return conf
+
+    def plot_subject_confusion_matrices(self, axs, trial_start, trial_stop, standardize=True, error_only=False):
+        for s, dataset in enumerate(self.datasets):
+            data_slice = dataset.data.iloc[trial_start:trial_stop]
             for task, task_name in enumerate(self.task_keys):
-                task_data = dataset.data.loc[dataset['Task type'] == task]
-                correct = task_data['object correct'].numpy()[trial_start:trial_stop]
-                selected = task_data['object selected'].numpy()[trial_start:trial_stop]
-                conf = confusion_matrix(correct, selected)
-                axs[s, task].imshow(conf)
-                axs[s, task].set_title(str(dataset) + ': ' + task_name)
+                task_data = data_slice.loc[data_slice['Task type'] == task + 1]
+                conf = self._get_confusion_matrix(task_data, standardize, error_only)
+                axs[task, s].imshow(conf)
+                axs[task, s].set_title(str(dataset) + ': ' + task_name)
         return axs
 
-    def plot_cue_color_degree_frequencies(self, axs):
+    def plot_color_degree_frequencies(self, axs, trial_start=0, trial_stop=-1, use_selected=False, error_only=False,
+                                      task_types=None):
         for s, dataset in enumerate(self.datasets):
-            if self.is_train:
-                task_data = dataset.data.loc[dataset.data['Task type'].isin((1, 2, 3, 4, 6))]
-            else:
-                raise NotImplementedError
-            for idx, color_val in enumerate(color_vals):
-                cue_data = task_data.loc[task_data["Cue"] == idx]
-                colors = cue_data['color degree'].to_numpy()
-                axs[s].hist(colors, bins=360, color=color_val, alpha=.25)
+            c_data = []
+            if task_types is None:
+                if self.is_train:
+                    task_types = (0, 1, 2, 3)
+                else:
+                    raise NotImplementedError
+            task_data = dataset.data.loc[dataset.data['Task type'].isin(task_types)]
+            task_data = task_data.iloc[trial_start:trial_stop]
+
+            if error_only:
+                task_data = task_data.loc[task_data["object correct"] != task_data["object selected"]]
+            for idx in range(28):
+                if idx in (12, 13, 26, 27):
+                    # skip grey option
+                    colors = np.array([])
+                else:
+                    if not use_selected:
+                        cue_data = task_data.loc[task_data["Cue state"] == idx]
+                        colors = cue_data['color degree'].to_numpy()
+                    else:
+                        selected = task_data.loc[task_data["object selected"] == idx]
+                        colors = selected["selected degree"].to_numpy()
+
+                c_data.append(colors)
+            axs[s].hist(c_data, bins=360, color=np.tile(color_vals, (2, 1)), stacked=True, alpha=1)
         return axs
-    #
-    # def plot_selected_color_degree_frequencies(self, axs, trial_start, trial_stop):
-    #     if task_types is None:
-    #         task_types = list(range(len(self.task_keys)))
 
     def load(self, handle: List[str]):
         if isinstance(handle, str):
@@ -214,28 +267,97 @@ class ExperimentManager:
         self.models = [pickle.load(open(os.path.join(savedir, handle[i]), 'rb')) for i, savedir in
                        enumerate(self.save_dirs)]
 
+    def create_similarity_space(self, axs, trial_start, trial_stop, mode='color', embed_dim=2, combine_subjects=True, algorithm='mds'):
+        if self.is_train and mode == 'color':
+            task_types = (0, 1, 5, 6)
+        elif self.is_train and mode == 'shape':
+            task_types = (2, 3)
+        elif mode == 'color':
+            task_types = (0, 2)
+        elif mode == 'shape':
+            task_types = (4, 6)
+        else:
+            raise NotImplementedError
+        all_embedded = []
+        datasets = [dataset.data.iloc[trial_start:trial_stop] for dataset in self.datasets]
+        names = [dataset.name for dataset in self.datasets]
+        if combine_subjects:
+            datasets = [pd.concat(datasets)]
+            names = ['all_subjects']
+
+        for s, dataset in enumerate(datasets):
+            task_data = dataset.loc[dataset['Task type'].isin(task_types) &
+                                    ~dataset['Cue'].isin([12, 13]) &
+                                    ~dataset['object selected'].isin([12, 13])]
+            simmilarity = self._get_confusion_matrix(task_data, standardize=True, error_only=False)
+            dissim = (np.max(simmilarity) - simmilarity).astype(float)
+            if algorithm == 'svd':
+                reducer = AdjacencySpectralEmbed(n_components=embed_dim, algorithm='full')
+            elif algorithm == 'mds':
+                reducer = MDScale(n=12, embed_dims=embed_dim, device='cpu')
+            else:
+                raise ValueError
+            embed = reducer.fit_transform(dissim, max_iter=500000)
+            embed = [np.array(e) for e in embed]
+            all_embedded.append(embed)
+            if not combine_subjects:
+                ax = axs[s]
+            else:
+                ax = axs
+            ax[0].set_title(names[s] + " Right Latent")
+            ax[1].set_title(names[s] + " Left Latent")
+            maxes = []
+            for i in range(2):
+                embed[i][:, 0] -= np.min(embed[i][:, 0])
+                embed[i][:, 1] -= np.min(embed[i][:, 1])
+                if embed_dim == 3:
+                    embed[i][:, 2] -= np.min(embed[i][:, 2])
+                maxes.append(np.max(embed[i]))
+            pad = maxes[0] * .1
+            ax[0].set_xlim(-pad, maxes[0]+pad)
+            ax[0].set_ylim(-pad, maxes[0]+pad)
+            pad = maxes[1] * .1
+            ax[1].set_xlim(-pad, maxes[1]+pad)
+            ax[1].set_ylim(-pad, maxes[1]+pad)
+            if embed_dim == 2:
+                ax[0].scatter(embed[0][:, 0], embed[0][:, 1], color=color_vals[:12, :], s=120)
+                ax[1].scatter(embed[1][:, 0], embed[1][:, 1], color=color_vals[:12, :], s=120)
+            elif embed_dim == 3:
+                ax[0].scatter(embed[0][:, 0], embed[0][:, 1], embed[0][:, 2], color=color_vals[:12, :], s=120)
+                ax[1].scatter(embed[1][:, 0], embed[1][:, 1], embed[0][:, 2], color=color_vals[:12, :], s=120)
+        return axs, all_embedded
+
 
 if __name__ == '__main__':
     import pickle
-    name = sys.argv[1]
-    i = 2
-    dataset_paths = []
-    while True:
-        try:
-            dataset_paths.append(sys.argv[i])
-        except IndexError:
-            break
-        i += 1
+
+    train_dataset_paths = ['./share/data/fixed_jeevestrain_2afc_og.csv', './share/data/fixed_woostertrain_2afc_og.csv',
+                           './share/data/fixed_jeevestrain_4afc_og.csv', './share/data/fixed_woostertrain_4afc_og.csv',
+                           './share/data/fixed_jocamotrain_4afc_og.csv']
     trials_to_load = [30000, 30000, 60000, 60000, 75000]
-    datasets = [MTurk1BehaviorData(dset, os.path.basename(dset.split('.')[0]), trials_to_load=trials_to_load[i]) for i, dset in enumerate(dataset_paths)]
+    datasets = [MTurk1BehaviorData(dset, os.path.basename(dset.split('.cs')[0]), trials_to_load=trials_to_load[i]) for
+                i, dset in enumerate(train_dataset_paths)]
     save_dirs = [os.path.join('models', dset.name) for dset in datasets]
     for save_dir in save_dirs:
         if not os.path.exists(save_dir):
             os.mkdir(save_dir)
-    runner = ExperimentManager(name, datasets, save_dirs)
-    
+    runner = ExperimentManager("train", datasets, save_dirs, unique_lrs=True, phase="train")
+    runner.fit(2000)
+    with open(os.path.join('models', 'train_all_lrs.pkl'), 'wb') as f:
+        pickle.dump(runner, f)
+    del runner
 
-    trials_to_load = [30000, 30000, 150000, 150000, 150000]
-    runner.fit(1250)
-    with open(os.path.join('models', name + '.pkl'), 'wb') as f:
+    probe_dataset_paths = ['./share/data/fixed_jeevesprobe_2afc_og.csv', './share/data/fixed_woosterprobe_2afc_og.csv',
+                           './share/data/fixed_jeevesprobe_4afc_og.csv', './share/data/fixed_woosterprobe_4afc_og.csv',
+                           './share/data/fixed_jocamoprobe_4afc_og.csv']
+    trials_to_load = [40000, 40000, 150000, 150000, 150000]
+    datasets = [MTurk1BehaviorData(dset, os.path.basename(dset.split('.cs')[0]), trials_to_load=trials_to_load[i]) for
+                i, dset in enumerate(probe_dataset_paths)]
+    save_dirs = [os.path.join('models', dset.name) for dset in datasets]
+    for save_dir in save_dirs:
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+    runner = ExperimentManager("probe", datasets, save_dirs, unique_lrs=True, phase="probe")
+    runner.fit(2000)
+    with open(os.path.join('models', 'probe_all_lrs.pkl'), 'wb') as f:
         pickle.dump(runner, f)
