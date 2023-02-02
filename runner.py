@@ -363,21 +363,22 @@ class ExperimentManager:
 if __name__ == '__main__':
     import pickle
 
-    # train_dataset_paths = ['data_files/fixed_jeevestrain_2afc_og.csv', 'data_files/fixed_woostertrain_2afc_og.csv',
-    #                        'data_files/fixed_jeevestrain_4afc_og.csv', 'data_files/fixed_woostertrain_4afc_og.csv',
-    #                        'data_files/fixed_jocamotrain_4afc_og.csv']
-    # trials_to_load = [30000, 30000, 60000, 60000, 75000]
-    # datasets = [MTurk1BehaviorData(dset, os.path.basename(dset.split('.cs')[0]), trials_to_load=trials_to_load[i], dev='cuda') for
-    #             i, dset in enumerate(train_dataset_paths)]
-    # save_dirs = [os.path.join('models', dset.name) for dset in datasets]
-    # for save_dir in save_dirs:
-    #     if not os.path.exists(save_dir):
-    #         os.mkdir(save_dir)
-    # runner = ExperimentManager("train", datasets, save_dirs, unique_lrs=False, unique_init=False, phase="train", dev='cuda')
-    # runner.fit(2000, mp=True)
-    # with open(os.path.join('models', 'train_class_lrs_class_init.pkl'), 'wb') as f:
-    #     pickle.dump(runner, f)
-    # del runner
+    train_dataset_paths = ['data_files/fixed_jeevestrain_2afc_og.csv', 'data_files/fixed_woostertrain_2afc_og.csv',
+                           'data_files/fixed_jeevestrain_4afc_og.csv', 'data_files/fixed_woostertrain_4afc_og.csv',
+                           'data_files/fixed_jocamotrain_4afc_og.csv']
+    trials_to_load = [30000, 30000, 60000, 60000, 75000]
+
+    datasets = [MTurk1BehaviorData(dset, os.path.basename(dset.split('.cs')[0]), trials_to_load=trials_to_load[i], dev='cuda') for
+                i, dset in enumerate(train_dataset_paths)]
+    save_dirs = [os.path.join('models', dset.name) for dset in datasets]
+    for save_dir in save_dirs:
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+    runner = ExperimentManager("train", datasets, save_dirs, unique_lrs=False, unique_init=False, phase="train", dev='cuda')
+    runner.fit(2000, mp=True)
+    with open(os.path.join('models', 'train_class_lrs_class_init.pkl'), 'wb') as f:
+        pickle.dump(runner, f)
+    del runner
 
     probe_dataset_paths = ['data_files/fixed_jeevesprobe_2afc_og.csv', 'data_files/fixed_woosterprobe_2afc_og.csv',
                            'data_files/fixed_jeevesprobe_4afc_og.csv', 'data_files/fixed_woosterprobe_4afc_og.csv',
