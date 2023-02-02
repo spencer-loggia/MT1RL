@@ -48,6 +48,7 @@ for subject in subjects:
                              (data['Cue'] < og_mapping[desired_task]['cues_min_max'][1])]
         task_data["Cue state"] = copy.copy(task_data["Cue"])
         task_data["Cue"] -= min(task_data['Cue'])
+        task_data[task_data >= 14] -= 14
         task_data['Task type'] = new_task
         task_name_col = [desired_task] * len(task_data)
         task_data['task name'] = task_name_col

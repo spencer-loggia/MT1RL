@@ -67,7 +67,8 @@ class MTurk1BehaviorData:
     def __iter__(self):
         for i in range(int(len(self.data))):
             row = self.data.iloc[i]
-            cue_idx = self.cue_reindex_map[row['Cue']]
+            self.cue_reindex, self.target_reindex, self.trial_reindex = self.reindex()
+            cue_idx = self.cue_reindex[row['Cue']]
             choice_idx = row['object selected']
             if self.is_4afc:
                 construct = {'cue_idx': [cue_idx],
@@ -103,7 +104,7 @@ class MTurk1BehaviorData:
         if False in [expc in self.data.columns for expc in expected_cols]:
             raise ValueError("All expected Cols must be in data file passed")
         self.num_cues = 14
-        self.num_targets = 28
+        self.num_targets = 14
         self.num_trial_types = self.data['Task type'].nunique()
         self.device = torch.device(dev)
         self.name = str(dataset_name)

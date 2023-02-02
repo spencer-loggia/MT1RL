@@ -9,26 +9,34 @@ import sys
 
 
 class MT1QL:
-    def __init__(self, num_cues, num_targets, num_trial_types, save_dir, unique_lrs=False, dev='cuda'):
+    def __init__(self, num_cues, num_targets, num_trial_types, save_dir, unique_lrs=False, unique_initial=False, dev='cuda'):
         """
         :param num_cues: number of cue options
         :param num_targets: number of target options
         """
         self.trial_types = num_trial_types
         self.device = torch.device(dev)
-        self.q_init = torch.nn.Parameter(torch.normal(size=(num_trial_types, num_cues, num_targets),
-                                                      mean=(1 / num_targets),
-                                                      std=(1 / num_targets) * .2,
-                                                      device=self.device))
+        self.num_cues = num_cues
+        self.num_targets = num_targets
+        if unique_initial:
+            self.q_init = torch.nn.Parameter(torch.normal(size=(num_trial_types, num_cues, num_targets),
+                                                          mean=0.,
+                                                          std=.05,
+                                                          device=self.device))
+            self.in_q_init = None
+        else:
+            self.q_init = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=0, std=.05, device=self.device))
+            self.in_q_init = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=0, std=.05, device=self.device))
         if unique_lrs:
             self.lrs = torch.nn.Parameter(
-                torch.normal(size=(num_trial_types, num_cues), mean=.1, std=.005, device=self.device))
+                torch.normal(size=(num_trial_types, num_cues), mean=-1., std=.05, device=self.device))
             self.temps = torch.nn.Parameter(
-                torch.normal(size=(num_trial_types, num_cues), mean=3, std=.2, device=self.device))
+                torch.normal(size=(num_trial_types, num_cues), mean=0, std=.05, device=self.device))
         else:
-            self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=.1, std=.005, device=self.device))
-            self.temps = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=2, std=.2, device=self.device))
+            self.lrs = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=-1, std=.05, device=self.device))
+            self.temps = torch.nn.Parameter(torch.normal(size=(num_trial_types,), mean=0, std=.05, device=self.device))
         self.unique_lrs = unique_lrs
+        self.unique_initial = unique_initial
         self.softmax = torch.nn.Softmax()
         self.sigmoid = torch.nn.Sigmoid()
         self.optim = torch.optim.Adam(lr=.01, params=[self.lrs] + [self.temps] + [self.q_init])
@@ -39,13 +47,31 @@ class MT1QL:
             self.device = torch.device(device)
         else:
             self.device = device
-        self.q_init = self.q_init.to(self.device)
-        self.lrs = self.lrs.to(self.device)
-        self.temps = self.temps.to(self.device)
+        self.q_init = self.q_init.detach().to(self.device).clone()
+        self.lrs = self.lrs.detach().to(self.device).clone()
+        self.temps = self.temps.detach().to(self.device).clone()
+        return self
+
+    def _initialize_q(self):
+        if self.unique_initial:
+            # an individual initial value for every cue - target pair
+            Q = self.q_init.clone()
+            Q = torch.sigmoid(Q).clone()
+        else:
+            # a single initial value for the correct diagonal on each trial type.
+            Q = torch.zeros((self.trial_types, self.num_cues, self.num_targets), device=self.device)
+            correct_vals = self.q_init.clone()
+            correct_vals = torch.sigmoid(correct_vals).clone()
+            incorrect_vals = self.in_q_init.clone()
+            incorrect_vals = torch.sigmoid(incorrect_vals).clone().reshape((-1, 1, 1))
+            Q = Q + incorrect_vals
+            correct_ind = torch.tile(torch.eye(self.num_cues, self.num_targets, device=self.device, dtype=bool),
+                                     (self.trial_types, 1, 1))
+            Q[correct_ind] = torch.tile(correct_vals[:, None], (1, min(self.num_cues, self.num_targets))).flatten()
+        return Q
 
     def learn_loop(self, trial_data, batch=True, combine_likelihoods=True, sameple_q=None):
-        Q = self.q_init.clone()
-        Q = torch.sigmoid(Q).clone()
+        Q = self._initialize_q()
         count = 0
         q_sample = []
         if combine_likelihoods:
@@ -58,11 +84,11 @@ class MT1QL:
             iter = trial_data.__iter__
         for trial_batch in iter():
             if self.unique_lrs:
-                lr = torch.abs(self.lrs[trial_batch['trial_type'], trial_batch['cue_idx']].clone())  # size batch
-                temp = torch.abs(self.temps[trial_batch['trial_type'], trial_batch['cue_idx']].clone())
+                lr = torch.sigmoid(self.lrs[trial_batch['trial_type'], trial_batch['cue_idx']]).clone()  # size batch
+                temp = torch.sigmoid(self.temps[trial_batch['trial_type'], trial_batch['cue_idx']]).clone()
             else:
-                lr = torch.abs(self.lrs[trial_batch['trial_type']].clone())
-                temp = torch.abs(self.temps[trial_batch['trial_type']].clone())
+                lr = torch.sigmoid(self.lrs[trial_batch['trial_type']]).clone() / 2
+                temp = torch.abs(self.temps[trial_batch['trial_type']]).clone()
             option_exp = Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_options']].clone()
             choice_probs = self.softmax(temp * option_exp)
             is_choice = torch.eq(trial_batch['choice_made'], trial_batch['choice_options'])
@@ -74,37 +100,35 @@ class MT1QL:
                 likelihoods[trial_batch['trial_type']].append(likelihood.detach().cpu().item())
             reward = torch.eq(trial_batch['correct_option'], trial_batch['choice_made']).float()
             current_value = Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_made']].clone()
-            Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_made']] = current_value + lr * (
-                    reward - current_value)
+            Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_made']] = current_value + lr * (reward - current_value)
             if sameple_q is not None and (count % sameple_q) == 0:
-                q_sample.append(Q.cpu().detach().numpy().reshape((-1, 14, 28)))
+                q_sample.append(Q.cpu().detach().numpy().reshape((-1, self.num_cues, self.num_targets)))
             count += 1
         if sameple_q is not None:
             return likelihoods, q_sample
         return likelihoods
 
     def free_behavior(self, trial_data, sample_q=100):
-        Q = self.q_init.clone()
-        Q = torch.sigmoid(Q).clone()
+        Q = self._initialize_q()
         count = 0
         q_sample = []
         rewarded = [list() for _ in range(self.trial_types)]
         iter = trial_data.__iter__
         for trial_batch in iter():
-            lr = torch.abs(self.lrs[trial_batch['trial_type']].clone())  # size batch
-            temp = torch.abs(self.temps[trial_batch['trial_type']].clone())
-            option_exp = Q[trial_batch['cue_idx'], trial_batch['choice_options']].clone()
+            lr = torch.sigmoid(self.lrs[trial_batch['trial_type']]).clone() / 2  # size batch
+            temp = torch.abs(self.temps[trial_batch['trial_type']]).clone()
+            option_exp = Q[trial_batch['trial_type'], trial_batch['cue_idx'], trial_batch['choice_options']].clone()
             choice_probs = self.softmax(temp * option_exp)
             np_probs = choice_probs.detach().cpu().numpy().squeeze()
             is_choice = np.random.choice(np.arange(len(np_probs)), p=np_probs)
             choice_made = trial_batch['choice_options'][:, is_choice]
             reward = torch.eq(trial_batch['correct_option'], choice_made).float()
             rewarded[trial_batch['trial_type']].append(reward.detach().cpu().item())
-            current_value = Q[trial_batch['cue_idx'], choice_made].clone()
-            Q[trial_batch['cue_idx'], choice_made] = current_value + lr * (
+            current_value = Q[trial_batch['trial_type'], trial_batch['cue_idx'], choice_made].clone()
+            Q[trial_batch['trial_type'], trial_batch['cue_idx'], choice_made] = current_value + lr * (
                     reward - current_value)
             if sample_q is not None and (count % sample_q) == 0:
-                q_sample.append(Q.cpu().detach().numpy().reshape((-1, 14, 28)))
+                q_sample.append(Q.cpu().detach().numpy().reshape((-1, 14, 14)))
             count += 1
         return rewarded, q_sample
 
@@ -129,9 +153,9 @@ class MT1QL:
         :return:
         """
         print("starting model...", trial_data.name)
-        print("Trial types...", self.q_init.shape[0])
-        print("Cues per trial...", self.q_init.shape[1])
-        print("Options per cue...", self.q_init.shape[2])
+        print("Trial types...", self.trial_types)
+        print("Cues per trial...", self.num_cues)
+        print("Options per cue...", self.num_targets)
         print("LR tensor shape...", self.lrs.shape)
         print("Temperature shape...", self.temps.shape)
         epoch_loss = []
@@ -139,16 +163,16 @@ class MT1QL:
             print("**********\n", str(trial_data), "EPOCH", epoch)
             self.optim.zero_grad()
             lepoch = self.learn_loop(trial_data, batch=True)
-            print('liklihood', lepoch,
-                  '\n**********')
+            print('likelihood', lepoch, 'init:', torch.sigmoid(self.q_init.detach().cpu()), 'lr:', torch.sigmoid(self.lrs.detach().cpu()) / 2,
+                  'temp:', torch.abs(self.temps.detach().cpu()), 'wrong init', torch.sigmoid(self.in_q_init.detach().cpu()), '\n**********')
             epoch_loss.append(lepoch.cpu().detach().item())
             (lepoch * -1).backward()
             self.optim.step()
-            if (epoch % 10) == 0:
-                if epoch == epochs - 1 or \
+            if (epoch % 10) == 0 or epoch == (epochs - 1):
+                if epoch == (epochs - 1) or \
                         (len(epoch_loss) > 5 and abs(epoch_loss[-1]) - abs(epoch_loss[-2]) < .2 and
                          abs(epoch_loss[-2]) - abs(epoch_loss[-3]) < .2):
-                    with open(os.path.join(self.save_dir, "snapshot_final_" + str(epoch) + ".pkl"), 'wb') as f:
+                    with open(os.path.join(self.save_dir, "Asnapshot_final_" + str(epoch) + ".pkl"), 'wb') as f:
                         pickle.dump(self, f)
                     return epoch_loss
                 with open(os.path.join(self.save_dir, "snapshot" + str(epoch) + ".pkl"), 'wb') as f:
